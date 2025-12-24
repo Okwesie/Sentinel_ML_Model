@@ -1,8 +1,17 @@
+# Web & UI
 streamlit==1.28.0
-pandas==2.0.3
-numpy==1.24.3
-joblib==1.3.2
-plotly==5.17.0
 flask==3.0.0
 flask-cors==4.0.0
+
+# Data Science & ML
+pandas==2.0.3
+numpy==1.24.3
 scikit-learn==1.3.0
+xgboost==2.0.3
+joblib==1.3.2
+
+# Visualization
+plotly==5.17.0
+
+# Cloud/Storage
+gdown==4.7.1s
