@@ -62,18 +62,42 @@ st.markdown("""
 # ============================================================================
 
 
+# ============================================================================
+# GOOGLE DRIVE LOADER (CORRECTED)
+# ============================================================================
+
+GDRIVE_FILE_ID = '1svIVO8BkrPSpHezqmhEXBcQjpGug3nCD'
+
+def download_from_gdrive(file_id, output_path):
+    """
+    Downloads the model using the fuzzy search method which is 
+    more reliable for Google Drive 'View' links.
+    """
+    if not os.path.exists(output_path):
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        with st.spinner(f"☁️ Syncing Model from Cloud..."):
+            # We use the full sharing URL + fuzzy=True for maximum reliability
+            url = f'https://drive.google.com/file/d/{file_id}/view?usp=sharing'
+            try:
+                gdown.download(url=url, output=output_path, quiet=False, fuzzy=True)
+            except Exception as e:
+                st.error(f"❌ Cloud Download Failed: {e}")
+
 @st.cache_resource
 def load_model():
     base_path = os.path.dirname(__file__)
     model_path = os.path.join(base_path, 'models', 'ghana_safety_ensemble_v2.pkl')
     
-    # ID from your provided folder link for the ensemble file
-    #GDRIVE_FILE_ID = '1C_oR8Yh0-M_x7U8uL5H9P7R-C2f6LpE0' # file id = https://drive.google.com/file/d/1svIVO8BkrPSpHezqmhEXBcQjpGug3nCD/view?usp=drive_link<-- Placeholder: Replace with actual File ID if download fails
-    GDRIVE_FILE_ID = '1svIVO8BkrPSpHezqmhEXBcQjpGug3nCD'
     try:
+        # 1. Ensure file exists
         if not os.path.exists(model_path):
-            download_from_gdrive('1-0o_vN7r6U3w5zV5U6S7_T7zY9X4Z2W1', model_path) # Example ID
+            download_from_gdrive(GDRIVE_FILE_ID, model_path)
             
+        # 2. Final check before loading
+        if not os.path.exists(model_path):
+            return None
+            
+        # 3. Load and Return
         package = joblib.load(model_path)
         return {
             'model': package['models']['xgb'],
@@ -83,10 +107,8 @@ def load_model():
             'version': package.get('version', '2.1.0_hybrid')
         }
     except Exception as e:
-        st.error(f"❌ Load Error: {e}")
+        st.error(f"❌ Model Initialization Error: {e}")
         return None
-
-model_package = load_model()
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
