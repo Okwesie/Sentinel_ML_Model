@@ -109,6 +109,8 @@ def load_model():
     except Exception as e:
         st.error(f"❌ Model Initialization Error: {e}")
         return None
+
+model_package = load_model()
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
