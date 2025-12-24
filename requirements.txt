@@ -15,3 +15,6 @@ plotly
 
 # Cloud/Storage
 gdown
+
+
+gunicorn
