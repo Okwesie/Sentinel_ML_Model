@@ -20,7 +20,7 @@ st.title("🔧 AIoT Hybrid V2 Comprehensive Debugger")
 st.markdown("Diagnose, tune, and analyze the XGBoost + Rule-Based Safety Ensemble")
 
 # ============================================================================
-# CLOUD MODEL LOADING
+# CLOUD MODEL LOADING (FIXED)
 # ============================================================================
 
 GDRIVE_FILE_ID = '1svIVO8BkrPSpHezqmhEXBcQjpGug3nCD'
@@ -28,9 +28,13 @@ GDRIVE_FILE_ID = '1svIVO8BkrPSpHezqmhEXBcQjpGug3nCD'
 def download_from_gdrive(file_id, output_path):
     if not os.path.exists(output_path):
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        with st.spinner(f"☁️ Downloading model from Google Drive..."):
-            url = f'https://drive.google.com/uc?id={file_id}'
-            gdown.download(url, model_path, quiet=False)
+        with st.spinner(f"☁️ Syncing model from Google Drive..."):
+            # Fixed: Using the full view link and fuzzy=True for reliability
+            url = f'https://drive.google.com/file/d/{file_id}/view?usp=sharing'
+            try:
+                gdown.download(url=url, output=output_path, quiet=False, fuzzy=True)
+            except Exception as e:
+                st.error(f"❌ Download failed: {e}")
 
 @st.cache_resource
 def load_model():
@@ -39,6 +43,10 @@ def load_model():
     try:
         if not os.path.exists(model_path):
             download_from_gdrive(GDRIVE_FILE_ID, model_path)
+            
+        # Re-check if file exists after download attempt
+        if not os.path.exists(model_path):
+            return None
             
         package = joblib.load(model_path)
         return package
@@ -49,7 +57,7 @@ def load_model():
 package = load_model()
 
 if package is None:
-    st.error("Model could not be loaded. Please check your internet connection and GDrive File ID.")
+    st.error("Model could not be loaded. Please check your internet connection and GDrive permissions.")
     st.stop()
 
 model = package['models']['xgb'] 
@@ -61,7 +69,7 @@ feature_names = package['feature_names']
 # ============================================================================
 
 st.sidebar.header("🛠️ Strategy Tuning")
-ml_weight = st.sidebar.slider("AI Influence (ML Prob)", 0.0, 1.0, 0.60, 0.05)
+ml_weight = st.sidebar.slider("AI Influence (ML Prob)", 0.0, 1.0, 0.60, 0.05, help="Weight of the XGBoost prediction")
 rule_weight = 1.0 - ml_weight
 
 st.sidebar.markdown("---")
@@ -84,13 +92,14 @@ df = pd.read_csv(uploaded_file)
 def calculate_hybrid(row):
     # 1. ML Prob
     input_data = pd.DataFrame([row[feature_names]])
+    # Ensure no missing features
     for col in feature_names:
         if col not in input_data.columns: input_data[col] = 0
         
     X_scaled = scaler.transform(input_data[feature_names])
     ml_prob = model.predict_proba(X_scaled)[0][1]
     
-    # 2. Rule Scoring
+    # 2. Rule Scoring (Ghana Context)
     rule_score = 0
     triggered = []
     if row.get('max_speed', 0) > 120:
@@ -103,6 +112,7 @@ def calculate_hybrid(row):
         rule_score += 0.2
         triggered.append("ERRATIC")
 
+    # 3. Final Score (Weighted Blend)
     final_score = min(1.0, (ml_prob * ml_weight) + (rule_score))
     risk = "HIGH" if final_score >= thresh_high else "MEDIUM" if final_score >= thresh_med else "LOW"
     
@@ -135,25 +145,40 @@ tab1, tab2, tab3 = st.tabs(["🎯 Confusion & Error", "📈 Feature Analysis", "
 with tab1:
     c1, c2 = st.columns(2)
     with c1:
-        conf = pd.crosstab(df['expected_risk'], df['pred_risk'])
-        st.plotly_chart(px.imshow(conf, text_auto=True, title="Confusion Matrix"), use_container_width=True)
+        # Confusion Matrix
+        conf = pd.crosstab(df['expected_risk'], df['pred_risk'], rownames=['True'], colnames=['Predicted'])
+        # Reorder for better visualization
+        order = ['HIGH', 'MEDIUM', 'LOW']
+        conf = conf.reindex(index=[o for o in order if o in conf.index], columns=[o for o in order if o in conf.columns], fill_value=0)
+        st.plotly_chart(px.imshow(conf, text_auto=True, title="True vs Predicted"), use_container_width=True)
     with c2:
         fig_box = px.box(df, x='expected_risk', y='hybrid_score', color='expected_risk', 
-                         title="Score Spread per Risk Level", color_discrete_map={'HIGH':'red','MEDIUM':'orange','LOW':'green'})
-        fig_box.add_hline(y=thresh_high, line_dash="dash", line_color="red")
+                         title="Score Spread per Risk Level", 
+                         color_discrete_map={'HIGH':'red','MEDIUM':'orange','LOW':'green'},
+                         category_orders={"expected_risk": ["HIGH", "MEDIUM", "LOW"]})
+        fig_box.add_hline(y=thresh_high, line_dash="dash", line_color="red", annotation_text="HIGH")
+        fig_box.add_hline(y=thresh_med, line_dash="dash", line_color="orange", annotation_text="MEDIUM")
         st.plotly_chart(fig_box, use_container_width=True)
 
 with tab2:
     feat_to_plot = st.selectbox("Select Feature to Analyze", feature_names)
-    st.plotly_chart(px.violin(df, x='expected_risk', y=feat_to_plot, color='expected_risk', box=True), use_container_width=True)
+    st.plotly_chart(px.violin(df, x='expected_risk', y=feat_to_plot, color='expected_risk', box=True, points="all",
+                              category_orders={"expected_risk": ["HIGH", "MEDIUM", "LOW"]},
+                              color_discrete_map={'HIGH':'red','MEDIUM':'orange','LOW':'green'}), use_container_width=True)
 
 with tab3:
+    # Diagnostic Logic
     high_median = df[df['expected_risk']=='HIGH']['hybrid_score'].median()
     low_median = df[df['expected_risk']=='LOW']['hybrid_score'].median()
+    
     if abs(high_median - low_median) < 0.2:
-        st.error(f"⚠️ Warning: Low Separability ({abs(high_median - low_median):.2f}). Adjust weights.")
+        st.error(f"⚠️ Warning: Low Separability ({abs(high_median - low_median):.2f}). The model is struggling to differentiate classes. Increase ML weight.")
     else:
-        st.success("✅ Good Separability between risk classes.")
+        st.success(f"✅ Good Separability. Classes are distinguished by {abs(high_median - low_median):.2f} points.")
+
+    missed_high = df[(df['expected_risk']=='HIGH') & (df['pred_risk'] != 'HIGH')]
+    if not missed_high.empty:
+        st.warning(f"🚨 Missing {len(missed_high)} HIGH risk trips. Check if the SPEED or NIGHT_STOP rules are too strict.")
 
 st.markdown("---")
 st.subheader("📄 Raw Diagnostic Data")
